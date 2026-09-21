@@ -24,10 +24,10 @@ use walkdir::WalkDir;
 /// Extracts an OCI layer tar stream into a destination directory, enforcing
 /// containment through [`SafeRoot`].
 ///
-/// Every destructive filesystem operation goes through the root handle, so on
-/// Linux the kernel (`openat2(RESOLVE_IN_ROOT)`) and on other platforms a
-/// lexical fallback guarantee that no entry can escape `dest` — even if the
-/// tar contains crafted symlinks aiming at the host filesystem.
+/// Every entry path is resolved within the extraction root. Compatible Linux
+/// kernels use `openat2(RESOLVE_IN_ROOT)` through pathrs; older Linux kernels
+/// and other platforms use the userspace resolver. Both re-anchor absolute
+/// symlinks so archive entries cannot escape `dest`.
 /// Lifecycle: `new(dest)` → one or more `extract_*` calls → `finalize()`.
 ///
 /// Decompressed-size budget: every `Regular`/`GNUSparse` data stream written
