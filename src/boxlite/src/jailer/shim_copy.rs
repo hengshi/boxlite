@@ -60,6 +60,7 @@ const LIBKRUNFW_PREFIX: &str = "libkrunfw.";
 /// Returns [`BoxliteError::Storage`] if:
 /// - Failed to create the `bin/` directory
 /// - Failed to copy the shim binary
+/// - Failed to preserve the shim binary's permissions
 /// - Failed to copy libkrunfw
 ///
 /// # Example
@@ -90,6 +91,19 @@ pub fn copy_shim_to_box(shim_path: &Path, box_dir: &Path) -> BoxliteResult<PathB
             e
         ))
     })?;
+
+    // reflink_copy creates the destination with the process default mode and
+    // does not preserve the executable bit from the source shim.
+    std::fs::metadata(shim_path)
+        .and_then(|metadata| std::fs::set_permissions(&dest_shim, metadata.permissions()))
+        .map_err(|e| {
+            BoxliteError::Storage(format!(
+                "Failed to preserve shim permissions {} -> {}: {}",
+                shim_path.display(),
+                dest_shim.display(),
+                e
+            ))
+        })?;
 
     if copied {
         tracing::debug!(
@@ -156,4 +170,31 @@ fn copy_libkrunfw(src_dir: &Path, dest_dir: &Path) -> BoxliteResult<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use tempfile::tempdir;
+
+    #[test]
+    fn copy_shim_restores_source_permissions() {
+        let dir = tempdir().unwrap();
+        let shim_path = dir.path().join("boxlite-shim");
+        let box_dir = dir.path().join("box");
+
+        std::fs::write(&shim_path, "fake shim").unwrap();
+        std::fs::set_permissions(&shim_path, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let copied_shim = copy_shim_to_box(&shim_path, &box_dir).unwrap();
+        std::fs::set_permissions(&copied_shim, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        copy_shim_to_box(&shim_path, &box_dir).unwrap();
+
+        assert_eq!(
+            std::fs::metadata(copied_shim).unwrap().mode() & 0o777,
+            0o755
+        );
+    }
 }
